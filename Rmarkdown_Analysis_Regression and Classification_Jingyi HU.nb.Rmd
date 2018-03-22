@@ -1,0 +1,488 @@
+---
+title: 'SY19 - TP note - Regression et classification '
+author: "Jingyi HU et Theo Manent"
+date: "November 13, 2017"
+output:
+  pdf_document: default
+  html_notebook: default
+fontsize: 10pt
+documentclass: article
+
+---
+
+##Classification
+Dans cette premi¨¨re partie, nous allons d¨¦crire notre m¨¦thologie pour construire notre mod¨¨le de classfication. Vous pouvez trouver tous les graphiques associ¨¦s dans l'archivre nomm¨¦ pdf.(De plus, si vous voulez vous pouvez entrer dans le fichier .RMD pour ex¨¦cuter les scripts.Changement de 'working path' : setwd("votre path"))
+
+Tout d'abord, nous avons fait importation et des d¨¦couverts des donn¨¦es, et nous voyons bien que les y sont des "1" ou "2". Donc, il s'agit un probl¨¨me de classification.
+
+```{r}
+X <- read.table('tp3_clas_app.txt', header = TRUE)
+#X$y
+#head(X, 2)
+```
+
+D'apr¨¨s le r¨¦sultat, nous trouvons que toutes les r¨¦sultats sont quantitatives et il y a 2 classes en pr¨¦sence.(y = 1 ou y = 2).  
+Nous allons passer ¨¤ ¨¦tudier est-ce qu"il existe des **correlations** fortes entre les variables.
+
+```{r results='hide'}
+library(corrgram)
+pdf("./pdf/corrgram")
+corrgram(X)
+dev.off()
+```
+D'apr¨¨s le graphique, nous trouvons que les variables sont corr¨¦l¨¦es 2 ¨¤ 2 pas fortement. Donc, nous allons ¨¦tudier si elles apportent des informations significatives sur y. Autrement dit pouvons nous selectionner un sous-ensemble de variables pour construire notre mod¨¨le?(subsets). Normalement, la fonction regsubset est utilis¨¦e pour la regression, mais ici nous pouvons l'utiliser pour la classification, car il s'agit d'un probl¨¨me de classification ¨¤ deux classes, on peut donc minimiser la somme des carres des erreurs MSE.
+```{r message=TRUE, warning=TRUE, paged.print=TRUE}
+library('leaps')
+pdf("./pdf/Xsignificatif")
+plot(regsubsets(y ~ ., nvmax = 20, data=X))
+dev.off()
+```
+D'apr¨¨s le graphique, nous pouvons trouver que les variables X2, X9, X10, X17, X20 et X23 soient suffisantes pour construire le mod¨¨le.  
+L'impact d'un subset selection
+
+###Methologie g¨¦n¨¦rale d'apprentissage d'un mod¨¨le
+Pour chaque mod¨¨le, afin de construire un estimateur sans biais de l'erreur sur l'echantillon, nous utilisons la m¨¦thode de l'ensemble de validation qui consiste ¨¤ partitionner al¨¦atoirement l'¨¦chantion en un ensemble d'apprentissage et un ensemble de test, avec une proportion de 2/3, 1/3.  Notre fonction est comme ci-dessous:
+
+```{r}
+split_dataset <- function(dataset, percentage_training_set) {
+  training_rows <- sample(1:nrow(dataset),
+                          percentage_training_set * nrow(dataset))
+  
+  res <- NULL
+  res$train_set <- dataset[training_rows, ]
+  res$test_set <- dataset[-training_rows, ]
+  
+  res
+}
+```
+
+###Premier m¨¦thode: Analys¨¦s discriminantes quadratique et lineaire(LDA et QDA)
+Supposons qu'il suit conditionnellement une loi normale multidimensionnelle ¨¤ chaque classe, nous pouvons utiliser LDA et QDA.  
+Quand est-il pour notre ¨¦chantillon ?
+
+```{r results='hide'}
+library(mvShapiroTest)
+```
+
+```{r}
+# nous s¨¦parons des individus selon leurs classe 1 ou 2(y = 1 ou 2)
+X_class1 = as.matrix(X[X$y == 1, 1:30])
+X_class2 = as.matrix(X[X$y == 2, 1:30])
+# et puis nous faisons un test de Shapiro (test de loi normal multidimensionnelle)
+mvShapiro.Test(X_class1)
+mvShapiro.Test(X_class2)
+```
+
+D'apr¨¨s le r¨¦sultat, nous ne rejettons pas l'hypothese qu'il suit une loi normale multidimensionnelles conditionnellement ¨¤ la chaque classe.  
+Sans hypothese suplementaire sur les distributions conditionnelles nous pouvons appliquer l'analyse discriminante lineaire.(LDA)
+```{r results='hide'}
+library(caret)
+library(MASS)
+attach(X)
+```
+
+```{r}
+set.seed(1) #pour obtenir le m¨ºme r¨¦sultat
+folds <- createFolds(y, k = 10, list = TRUE, returnTrain = FALSE)
+
+error_rates_lda <- matrix(nrow = 10, ncol = 1)
+#car on a 10 folds
+
+#using 10-folds cross-validation
+for (i in 1:10) {
+  #make the folds
+  train_df_lda <- as.data.frame(X[-folds[[i]],])
+  test_df_lda <- as.data.frame(X[folds[[i]],])
+  
+  colnames(train_df_lda)[31] <- "y_lda"
+  colnames(test_df_lda)[31] <- "y_lda"
+  
+  #training
+  model <- lda(y_lda~X2+X9+X10+X17+X20+X23, data = train_df_lda)
+  
+  #predict
+  lda.pred <- predict(model, newdata = test_df_lda)
+  
+  #error_rate
+  error_rates_lda[i, ] <- length(which(as.vector(lda.pred$class) != as.vector(test_df_lda$y_lda)))/length(as.vector(test_df_lda$y_lda))
+} 
+
+print(mean(as.vector(error_rates_lda))) # tout 0.22 que les xi 0.2
+```
+Ici, nous avons appliqu¨¦ la fonction QDA sur tous les variables, et l'erreur est 0.22, en m¨ºme temps nous avons pris les m¨ºmes donn¨¦es en appiquant le QDA seulement sur les xi plus significatifs, l'erreur est 0.2.  Nous trouvons que le LDA fonctionne mieux s'il est appliqu¨¦ sur les variables s¨¦lectionn¨¦s.  
+
+Mais nous ne savons pas si l'analyse discriminante lineaire suffisant ou pas, car ici nous suppons que la matrice de variance est commune pour toutes les classes(hypothese d'homoscedasticite).  
+Nous devons v¨¦rifier si c'est le cas.  
+
+```{r}
+# nous calculons l'erreur moyenne entre les ¨¦l¨¦ments des matrices de variance pour les deux classes
+sum(abs(var(X_class1) - var(X_class2))) / 30
+```
+
+Mais nous ne sommes pas sur que l'hypothese d'homoscedasticite est correct si nous ne faisons pas un meilleur test. 
+Si on fait le QDA:
+```{r}
+error_rates = matrix(nrow=10, ncol=1)
+# using 10-folds cross-validation
+for (i in 1:10) {
+  
+  # make the folds
+  train_df_qda = as.data.frame(X[-folds[[i]],])
+  test_df_qda = as.data.frame(X[folds[[i]],])
+  colnames(train_df_qda)[31] = "y_qda"
+  colnames(test_df_qda)[31] = "y_qda"
+  
+  # training
+  model = qda(y_qda~X2+X9+X10+X17+X20+X23 , data = train_df_qda)
+  
+  # predict
+  qda.pred = predict(model, newdata = test_df_qda)
+  
+  # error rate
+  error_rates[i,] = length(which(
+    as.vector(qda.pred$class) != as.vector(test_df_qda$y_qda)
+  ))/length(as.vector(test_df_qda$y_qda))
+}
+mean(as.vector(error_rates))   # 1.Pour tous les vbs 0.295  2.que les vbs significatifs 0.235
+```
+Ici, nous avons appliqu¨¦ la fonction QDA sur tous les variables, et l'erreur est 0.295, en m¨ºme temps nous avons pris les m¨ºmes donn¨¦es en appiquant le QDA seulement sur les xi plus significatifs, l'erreur est 0.235.  Le QDA aussi, il fonctionne mieux avec les xi s¨¦lectionn¨¦s.  
+
+Nous allons ¨¦tudier l'ind¨¦pendance des variables, s'ils sont ind¨¦pendants, nous pouvons appliquer le classifieur bayesien naif.
+
+```{r}
+pdf("./pdf/corrgram1")
+corrgram(X_class1)
+dev.off()
+pdf("./pdf/corrgram2")
+corrgram(X_class2)
+dev.off()
+```
+
+Nous pouvons voir le graphique, cette hypoth¨¨se semble clairement non recevable car les variables sont corr¨¦l¨¦s. Dans ce cas l¨¤, nous pouvons appliquer le scale sur les variables.  Pour r¨¦duire le taille de rapport, ici nous rendrons pas le d¨¦tail, d'apr¨¨s r¨¦sultat, nous trouvons que c'est toujours pas le cas pour appliquer le classifieur bayesien naif.
+
+```{r fig.show='hide'}
+SX_class1 = scale(as.matrix(X[X$y == 1, 1:30]))
+SX_class2 = scale(as.matrix(X[X$y == 2, 1:30]))
+pdf("./pdf/corrgramS1")
+corrgram(SX_class1)
+dev.off()
+pdf("./pdf/corrgramS2")
+corrgram(SX_class2)
+dev.off()
+```
+
+
+###Deuxi¨¨me m¨¦thode: Utiliser une for¨ºt al¨¦atoire de d¨¦cision binaire
+Pour r¨¦duire l'erreur sur les donn¨¦es, nous utilisons une foret al¨¦atoire d'arbres de decision.
+
+```{r results='hide'}
+library("randomForest")
+```
+
+```{r}
+#X <- read.table('tp3_clas_app.txt', header = TRUE)
+X$y <- as.factor(X$y)
+
+res <- split_dataset(X, 2 / 3)#nous utilisons la fonction d¨¦finise avant
+train_set <- res$train_set
+test_set <- res$test_set
+
+# Creation magique (et naive) de la foret
+rf <- randomForest(y ~ ., data = train_set)
+pdf("./pdf/rf")
+plot(rf) 
+dev.off()
+
+# Analyse de l'erreur en fonction de la taille des arbres et du nombre d'arbres
+#p = dim(train_set)[2]#le nombre de colonnes
+#mtry = floor(sqrt(p)) # valeur empirique optimale pour un pbm de classification
+#rfopt <- randomForest(y ~ ., data = train_set, ntree = 50, mtry = mtry)
+#ntree = 50 selon le graphique
+predictions <- predict(rf, newdata = test_set[, 1:30], type = 'class')
+erreur <- mean(predictions != test_set$y)
+erreur  #  0.1791045
+```
+
+Nous observons un r¨¦sultat relativement satisfaisant ( *erreur = 0.1791045*).  
+Celui-ci est meilleur car il peut r¨¦duire le Test MSE, et est facilement et rapidement interpr¨¦table.
+
+### Troisieme id¨¦e: regression logistique avec validation crois¨¦e
+
+Nous pouvons utiliser la regression logistique pour estimer directement les probabilites d'appartenance ¨¤ la classe.  
+Si nous utilisons seulement la methode de l'ensemble de validation, nous avons obtenu une erreur proche de 0.5, c'est pas bon du tout et c'est pire qu'un mod¨¨le de bernouilli.  
+Afin de r¨¦duire l'erreur, nous utilisons la methode de validation crois¨¦e(Cross-Validation) qui consiste ¨¤ r¨¦echantionner plusieurs l'ensemble d'apprentissage pour garder uniquement le meilleur mod¨¨le.
+```{r results='hide'}
+library('DAAG')
+```
+
+```{r}
+#X <- read.table('tp3_clas_app.txt', header = TRUE)
+X$y <- as.factor(X$y)
+obj <- glm(y ~ ., data=X, family = binomial(logit))
+CVbinary(obj, nfolds=10)
+
+```
+
+Selon le r¨¦sultat, l'estimation de la pr¨¦cision par la m¨¦thode de la validation crois¨¦e avec un modele de regression logistique binaire est de *0.77*. Donc, l'erreur = 1-0.75 = 0.25.
+
+###Quati¨¨me m¨¦thode : KNN
+```{r}
+library(class)
+error_rates <- matrix(nrow = 50, ncol = 10) 
+
+for(k in 1:50){
+  #using 10-folds cross-valisation
+  for (i in 1:10) {
+    #make the folds
+    train_df <- as.data.frame(X[-folds[[i]],])
+    test_df <- as.data.frame(X[folds[[i]],])
+    colnames(train_df)[31] = "y_df"
+    colnames(test_df)[31] = "y_df"
+    
+    #knn prediction
+    knn.pred <- knn(train_df[, -31], test_df[, -31], train_df$y_df, k = k)
+    
+    error_rates[k,i] <- 
+      (length(which(as.vector(knn.pred) != 
+                      as.vector(test_df$y_df)))/length(test_df$y_df))
+  }
+}
+#last prediction confusion table
+
+table(knn.pred, test_df$y_df)
+
+mean_error_rates <- apply(error_rates, 1, mean)
+pdf("./pdf/KNN_MeanErrorRate")
+plot(1:50, mean_error_rates, 
+     main = "Mean Error Rate for knn in function of K parameter", 
+     xlab = "K value", ylab = "Mean Error Rate")
+dev.off()
+mean(mean_error_rates)
+
+```
+
+Selon le r¨¦sultat, nous trouvons que l'erreur moyen ¨¦gale 0.2477.  
+Si nous comptons tous les r¨¦sultats que nous avons obtenu avant:  
+
+M¨¦thode                                   |   Erreur
+------------------------------------------|------------
+ QDA(prendre tous les xi)                 |   0.295
+ Logitique regression                     |   0.250
+ KNN                                      |   0.247
+ QDA(prendre que les xi s¨¦lectionn¨¦)      |   0.235
+ LDA(prendre tous les xi)                 |   0.220
+ LDA(prendre que les xi s¨¦lectionn¨¦)      |   0.200
+ Random Forest                            |   0.179     
+ 
+ D'apres le tableau, nous voyons que le meilleur m¨¦thode est Random Forest.
+          
+## Regression
+
+```{r include=FALSE}
+
+library(MASS)
+library(FNN)
+library(leaps)
+library(caTools)
+library(glmnet)
+library(stats)
+library(pls)
+library(ISLR)
+
+data <- read.table('tp3_reg_app.txt', header = TRUE)
+sum(is.na(data))#Pour v¨¦rifier s'il y a manque des donn¨¦es
+data <- as.matrix(data)
+data_reg <- as.data.frame(data)
+n <- nrow(data_reg)
+
+```
+
+###Penser ¨¤ changer le forme de Xi
+Si nous consid¨¦rons ¨¤ construire une base de donn¨¦es qui contient non seulement Xi, mais aussi X^2, log(X), et puis nous utilisons le Forward Selection pour voir si ce m¨¦thode fonnctionne bien
+```{r}
+Ycarre = data_reg[,-51]^2
+Ylog10 = log10(data_reg[,-51])
+Ylog2 = log2(data_reg[,-51])
+```
+```{r}
+newdata_reg = data.frame(data_reg[,-51], Ycarre, Ylog10, Ylog2,data_reg[,51])
+colnames(newdata_reg[201]) ="y"
+```
+
+```{r}
+min.model = lm(newdata_reg[,201] ~ 1, data=newdata_reg)
+biggest <- formula(lm(newdata_reg[,201]~-newdata_reg[,201],newdata_reg))
+biggest
+fwd.model = step(min.model, direction='forward', scope=biggest)
+
+```
+### Partition des donn¨¦s
+
+La premi¨¨re ¨¦tape de traitement des donn¨¦s consiste ¨¤ r¨¦aliser une partition entre donn¨¦s d'apprentissage (2/3) et donn¨¦s de test (1/3). Nous choisissons ces proportions, qui sont couramment utilis¨¦s. Ainsi, seules les donn¨¦s d'apprentissage seront utilis¨¦s pour regression, tandis que les donn¨¦s de test serviront ¨¤ aluer la performance du mod¨¨le.
+
+```{r, include=FALSE}
+set.seed(1)
+napp <- round(2*n/3)
+ntst <- n-napp
+train <- sample(1:n,napp)
+data_train <- data_reg[train,]
+data_test <- data_reg[-train,]
+
+```
+
+### Subset selection
+
+Nous commencons par d¨¦finir la fonction qui nous permettra d'extraire les meilleurs sous-ensembles de pr¨¦icteurs. Cette fonction est appliqu¨¦ au donn¨¦s d'apprentissage. 
+
+```{r fig.width=7}
+
+getSubsets <- function(formula, train_data, main = '', xlab = '', ylab = ''){
+  reg.fit_only_means = regsubsets(formula, data = train_data, really.big = TRUE)
+  pdf("./pdf/adjr2.pdf")
+  plot(reg.fit_only_means, scale = "adjr2", main = main, xlab = xlab, ylab = ylab + ' adjr2')
+  dev.off()
+  pdf("./pdf/bic.pdf")
+  plot(reg.fit_only_means, scale = "bic", main = main, xlab = xlab, ylab = ylab + ' bic')
+  dev.off()
+  pdf("./pdf/Cp.pdf")
+  plot(reg.fit_only_means, scale = "Cp", main = main, xlab = xlab, ylab = ylab + ' Cp')
+  dev.off()
+  summary.out <- summary(reg.fit_only_means)
+  as.data.frame(summary.out$outmat)
+  return(reg.fit_only_means)
+}
+wholedata.subsets <- getSubsets(y~., data_train, 
+                                'Subset Selection for 2/3rds of whole set', 
+                                'Predictors', 'Values')
+
+```
+Ici, nous gardons les graphiques dans l'archivre. D'apr¨¨ ces 4 graphiques, les principaux pr¨¦icteurs sont : $X_4$, $X_{19}$, $X_{22}$, $X_{24}$, $X_{27}$, $X_{35}$, $X_{39}$. Nous les conservons pour la suite. Notre modele sera donc du type :
+
+$Y = \beta_0 + \beta_1 X_4 + \beta_2 X_{19} + \beta_3 X_{22} + \beta_4 X_{24} + \beta_5 X_{27} + \beta_6 X_{35} + \beta_7 X_{39} + \beta_8 X_{41}$
+ 
+ 
+### Cross Validation
+
+Nous faisons le choix d'utiliser le k-fold cross Validation, qui a prouv¨¦ son efficacit? empirique avec un bon compromis bias-variance. Dans le cadre de ce TP, nous optons pour k = 10. Nous divisons donc les donnees en k parties ¨¦gales. Pour chacun on fit un modele sur tousles autres plis. Enfin, nous calculons le R^2^ de ce modele. La fonction de 10-Fold Cross Validation est d¨¦finie comme suit : 
+
+```{r }
+crossValidate <-function(formula, data, k = 10){
+n <- nrow(data)
+  folds <- sample(1:k, n, replace = TRUE)
+  cv <- 0
+  for(k in 1:k){
+    reg <- lm(formula, data = data[folds != k,])
+    pred <- predict(reg, newdata = data[folds == k,])
+    cv <- cv + sum((data$y[folds == k] - pred)^2)
+  }
+  cv <- cv/n 
+  return(cv)
+}
+
+```
+
+La fonction BatchCrossValidate nous permet d'appliquer le cross validation ? tous les modeles trouv¨¦ lors de la phase.  
+D'apr¨¨s le graphique avant, nous avons trouv¨¦ les xi qui sont plus significatifs: X4, X19, X22, X24, X27, X35, X39.
+
+```{r, include=FALSE}
+batchcrossvalidate <- function(k = 5){
+  adjr_cv = crossValidate(y ~ X4+X19+X22+X24+X27+X35+X39, data_train)
+  bic_cv = crossValidate(y ~X4+X19+X22+X24+X27+X35+X39, data_train)
+  Cp_cv = crossValidate(y ~X4+X19+X22+X24+X27+X35+X39, data_train)
+  # PLot
+  pdf("./pdf/barplot.pdf")
+  barplot(height = c(adjr_cv, bic_cv, Cp_cv), names.arg=c('adjusted r^2', 'BIC', 'Cp'))
+  dev.off()
+  return (as.data.frame(c(adjr_cv, bic_cv, Cp_cv)))
+}
+```
+
+En l'executant 10 fois, on obtient un tableau recupitulatif de la cross-validation de chaque methode : 
+
+```{r, include=FALSE}
+plot_cross_validations <- function(k = 5){
+
+  adjr <- rep(0:10)
+  bic <- rep(0:10)
+  cp <- rep(0:10)
+  
+  for(i in 1:10){
+    res <- batchcrossvalidate(k)
+    #print(res)
+    adjr[i]<-res[1,1]
+    bic[i]<-res[2,1]
+    cp[i] <-res[3,1]
+  }
+  data_critere = data.frame(adjr, bic, cp)
+  names(data_critere) = c("adjusted r^2", "bic", "cp")
+  return (data_critere)
+}
+```
+```{r, fig.width=7}
+resultat = plot_cross_validations(5)  #find the moyen pour les 4 cols
+
+print(mean(resultat$`adjusted r^2`))
+print(mean(resultat$bic)) 
+print(mean(resultat$cp)) 
+
+```
+
+
+### Regularisation
+
+```{r}
+x <- model.matrix(y~., data_reg)
+y<-as.data.frame(data_reg$y)
+
+set.seed(1)
+xapp <- x[train, ]
+yapp <- y[train, ]
+xtst <- x[-train, ]
+ytst <- y[-train, ]
+```
+
+#### Lasso
+
+```{r}
+cv.out_lasso <- cv.glmnet(xapp,yapp,alpha=1)
+pdf("./pdf/cv.out_lasso.pdf")
+plot(cv.out_lasso)
+dev.off()
+bestlam_lasso=cv.out_lasso$lambda.min
+fit.lasso<-glmnet(xapp,yapp,lambda = bestlam_lasso,alpha = 1)
+lasso.pred<-predict(fit.lasso, s = cv.out_lasso$lambda.min, newx = xtst)
+
+#calcul MSE
+print(mean((ytst-lasso.pred)^2))
+
+```
+
+#### Ridge
+```{r}
+library(glmnet)
+cv.out_ridge <- cv.glmnet(xapp, yapp, alpha = 0,parallel=TRUE)
+pdf("./pdf/cv.out_ridge.pdf")
+plot(cv.out_ridge)
+dev.off()
+bestlam_ridge=cv.out_ridge$lambda.min
+fit.ridge<-glmnet(xapp,yapp,lambda = bestlam_ridge,alpha = 0)
+ridge.pred <- predict(fit.ridge, s = cv.out_ridge$lambda.min, newx = xtst)
+summary(ridge.pred)
+
+#calcul de MSE
+print(mean((ytst-ridge.pred)^2))
+```
+Si nous comptons tous les r¨¦sultats que nous avons obtenu avant:  
+
+M¨¦thode                     |   Test Erreur
+----------------------------|--------------
+ Adjusted r^2               |   126.6199
+ Cp                         |   125.8647
+ BIC                        |   125.8157
+ Ridge                      |   94.21217
+ lasso                      |   79.70625
+ 
+Nous voyons bien que le 'lasso' est le meilleur!
+
+
+
